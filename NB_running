@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Oct 16 14:52:45 2023
+
+@author: ziyuanchen
+"""
+
+from __future__ import division
+from builtins import range
+import numpy as np
+np.seterr(divide='ignore') # these warnings are usually harmless for this code
+# np.random.seed(0)
+
+from matplotlib import pyplot as plt
+import matplotlib
+import os
+matplotlib.rcParams['font.size'] = 8
+import pandas as pd
+import pyhsmm
+from Distributions import Defoc_Gaussian
+from pyhsmm.util.text import progprint_xrange
+from PIL import Image
+from strobesim import strobe_multistate, FractionalBrownianMotion3D
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["figure.dpi"] = 600
+
+
+import glob
+
+from NOBIAS import NOBIAS_Dataset, NOBIAS_Dataset_allfile, reorderSeq, NOBIAS_Dataset_allfileMapping
+import multiprocessing
+
+
+
+# when there are subfolders
+def Getpath(trackfolder):
+    
+    subfolders = [f.path for f in os.scandir(trackfolder) if f.is_dir()]
+    datasets = [os.path.basename(path) for path in subfolders]
+    PathDict = {}
+    for i, dataset in enumerate(datasets):
+        subsubfolders = [f.path for f in os.scandir(subfolders[i]) if f.is_dir()]
+        paths_list = []
+        for subsubfolder in subsubfolders:
+            files = glob.glob(subsubfolder+'/*.csv', recursive=True)
+            for file in files:
+                # paths_list.append((file, os.path.basename(subfolder))) 
+                paths_list.append((file, os.path.basename(file)[:-4])) 
+        paths = pd.DataFrame(paths_list, columns=['filepath', 'condition'])
+        paths = paths[paths["condition"] != 'other']
+        PathDict[dataset] = paths
+    return PathDict
+
+
+# when there are no sub folders
+
+
+def Run_NOBIAS(paths, niter):
+    NOBIASout = NOBIAS_Dataset(paths)
+    print('finish dataloading, start sampling')
+    NOBIASout.Sample(niter = niter)
+    return NOBIASout
+
+
+def parallel_processing_NOBIAS(PathDict, niter=100):
+    num_processes = min(multiprocessing.cpu_count(), len(PathDict))  # Get the number of available CPU cores
+    pool = multiprocessing.Pool(processes=num_processes)
+
+    NOBIASout = {}  # Dictionary to store the results
+
+    # Use the map function to parallelize the processing
+    # Each process will call the process_item function with an item from the list
+    for key, result in zip(PathDict.keys(), \
+                           pool.starmap(Run_NOBIAS, zip(PathDict.values(), [niter] * len(PathDict)))):
+        NOBIASout[key] = result
+
+    pool.close()
+    pool.join()
+
+    return NOBIASout
+# datasets = ["WT2"]
+
+def ExtractCellfolder(trackfolder, movedfolder):
+    import shutil
+    subfolders = [f.path for f in os.scandir(trackfolder) if f.is_dir()]
+    for subfolder in subfolders:
+        subsubfolders = [f.path for f in os.scandir(subfolder) if f.is_dir()]
+        for subsubfolder in subsubfolders:
+            new_base_name = os.path.basename(subfolder)+'_'+os.path.basename(subsubfolder)
+            if not os.path.isdir(os.path.join(movedfolder, new_base_name)):
+                shutil.copytree(subsubfolder, os.path.join(movedfolder, new_base_name))
+                
+    return
+
+def OrganByCondition(trackfolder):
+    subfolders = [f.path for f in os.scandir(trackfolder) if f.is_dir()]
+    datasets = [os.path.basename(path) for path in subfolders]
+    
+    paths_list = []
+    for i, dataset in enumerate(datasets):
+        subsubfolders = [f.path for f in os.scandir(subfolders[i]) if f.is_dir()]
+        
+        for subsubfolder in subsubfolders:
+            files = glob.glob(subsubfolder+'/*.csv', recursive=True)
+            for file in files:
+                # paths_list.append((file, os.path.basename(subfolder))) 
+                paths_list.append((file, dataset, os.path.basename(file)[:-4])) 
+    paths = pd.DataFrame(paths_list, columns=['filepath', 'condition','trackType'])
+    paths = paths[paths["trackType"] != 'other']
+    
+    return paths
+
+if __name__ == '__main__':
+    # analysisfolder = '/home/ziyuanchen/Documents/MFM/analysis/StaPL_halosnap/'
+    # trackfolder = analysisfolder+'sortedTrajectories/'
+    # PathDict = Getpath(trackfolder)
+    # all_pd = []
+    # for dataset in PathDict:
+    #     temppd = PathDict[dataset]
+    #     temppd.loc[:,'condition'] = temppd.loc[:,'condition'] + '_' +dataset
+    #     all_pd.append(temppd)
+    # all_pd = pd.concat(all_pd)
+    import pickle
+    with open('/home/ziyuanchen/Documents/MFM/040824/manual_filter/SMT_Brg1SNAP_strict_040824','rb') as fh:
+        SAD_smallrange = pickle.load(fh)
+    all_pd = SAD_smallrange[0].paths
+    NOBIASout040824_all = NOBIAS_Dataset(all_pd)
+    NOBIASout040824_all.parallelSample(niter = 100)
+    # NOBIASout040824_seqarate = NOBIAS_Dataset_allfile(all_pd)
+    # NOBIASout202310_seqarate.Sample(niter = 100)
+    
+    # PathDict_ZC002_1day.loc[:,'condition'] = PathDict_ZC002_1day.loc[:,'condition'] + 'ZC002_1day'
+    
+    
