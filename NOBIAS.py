@@ -178,10 +178,55 @@ class NOBIAS_Dataset(object):
                            for used_state in self.posteriormodel[key].used_states]
             D[key] = [(self.posteriormodel[key].obs_distns[used_state].sigma.trace() - self.loc_err**2)
                       /(4*self.frame_interval) 
-                      for used_state in self.posteriormodel[key].used_states]  
+                      for used_state in self.posteriormodel[key].used_states]
+            D[key],weight[key] = sorted(zip(D[key], weight[key]), key=lambda x: x[0])
         return (D, weight)
     
+    def reorderSeq(self):
+        for key in self.posteriormodel:
+            model = self.posteriormodel[key]
+            if not hasattr(model, 'sorted_state_seq'):
+                Sigmatrace =[model.obs_distns[used_state].sigma.trace() for used_state in model.used_states]
+                NewStateID = np.argsort(Sigmatrace)
+                sorted_state_seq = []
+                for stateseq in model.stateseqs:
+                    sorted_state_seq.append(replace_values(stateseq, model.used_states, NewStateID))
+                model.sorted_state_seq = sorted_state_seq
+                self.posteriormodel[key] = model
+        return self
+    def _calculate_T(self):
+        for key in self.posteriormodel:
+            
+            if not hasattr(self.posteriormodel[key], 'sorted_state_seq'):
+                self.reorderSeq()
+            self.posteriormodel[key].TransRate = calculate_transition_rates(self.posteriormodel[key].sorted_state_seq)
+            
+            
+        
     
+def calculate_transition_rates(data):
+    transition_counts = {}
+    state_counts = {}
+
+    # Iterate over each array in the data
+    for sequence in data:
+        previous_state = None
+        for state in sequence:
+            if previous_state is not None:
+                # Increment transition count from previous_state to state
+                transition_counts[(previous_state, state)] = transition_counts.get((previous_state, state), 0) + 1
+            # Increment state count for the current state
+            state_counts[state] = state_counts.get(state, 0) + 1
+            previous_state = state
+
+    # Calculate transition rates
+    transition_rates = {}
+    for transition, count in transition_counts.items():
+        from_state, to_state = transition
+        from_state_count = state_counts[from_state]
+        transition_rates[transition] = count / from_state_count
+
+    return transition_rates
 
 def _Indi_Sample(model, steps, niter,pixel_size_um):
     if isinstance(steps[0], pd.DataFrame):
